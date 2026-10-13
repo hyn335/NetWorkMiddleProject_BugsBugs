@@ -957,9 +957,6 @@ public class BugsBugsGame : MonoBehaviour
         title.fontStyle = FontStyle.Bold;
         AddOutline(title, new Color(0.25f, 0.15f, 0f, 1f), 3f);
 
-        var sub = MakeText(panel, "Dodge the falling bugs!", 24, Color.white, TextAnchor.MiddleCenter);
-        Place(sub.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, 95), new Vector2(460, 40));
-
         tapToStartText = MakeText(panel, "TAP TO START", 38, Color.white, TextAnchor.MiddleCenter);
         Place(tapToStartText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, -20), new Vector2(460, 60));
         tapToStartText.fontStyle = FontStyle.Bold;
@@ -967,10 +964,6 @@ public class BugsBugsGame : MonoBehaviour
 
         titleBestText = MakeText(panel, "BEST  0", 26, Color.white, TextAnchor.MiddleCenter);
         Place(titleBestText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, -80), new Vector2(460, 40));
-
-        var help = MakeText(panel, $"STICK  :  Move\nDASH  :  Quick Dash (CD {dashCooldown:0.#}s)\nSHIELD  :  {shieldDuration:0.#}s Invincible (CD {shieldCooldown:0.#}s)\nFLOWER  :  Petals smash the bugs!", 21, new Color(1, 1, 1, 0.9f), TextAnchor.MiddleCenter);
-        Place(help.rectTransform, new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 100), new Vector2(460, 130));
-        help.lineSpacing = 1.2f;
     }
 
     void BuildResult(Transform root)
