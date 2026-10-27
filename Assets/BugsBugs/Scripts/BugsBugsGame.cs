@@ -238,7 +238,9 @@ public class BugsBugsGame : MonoBehaviour
     Font font;
     bool customFont; // Resources 의 폰트 파일을 쓰는 중인지
     Sprite uiCircle;
-    GameObject hud, titlePanel, resultPanel, pausePanel;
+    GameObject hud, titlePanel, resultPanel, pausePanel, howToPanel;
+    Text howToButtonLabel;
+    bool howToStartsGame; // 조작 안내의 버튼이 게임을 시작하는지 (첫 판) / 그냥 닫는지 (로비에서 열었을 때)
     Text hintText;      // 조작 안내 (게임 시작 때)
     Text resultScoreLabel;
     float hintTimer;
@@ -547,6 +549,7 @@ public class BugsBugsGame : MonoBehaviour
         hud.SetActive(false);
         resultPanel.SetActive(false);
         pausePanel.SetActive(false);
+        howToPanel.SetActive(false);
         sound.SetBgmDucked(false);
         titlePanel.SetActive(true);
         titleBestText.text = "BEST " + best;
@@ -1628,6 +1631,7 @@ public class BugsBugsGame : MonoBehaviour
         BuildTitle(root);
         BuildResult(root);
         BuildPause(root);
+        BuildHowTo(root);
 
         // 받아 온 폰트는 이미 굵은 글꼴이라, 유니티가 억지로 한 번 더 굵게 하면 글자가 뭉개짐 -> 굵게 끄기
         if (customFont)
@@ -1767,7 +1771,8 @@ public class BugsBugsGame : MonoBehaviour
         titlePanel = panel.gameObject;
         var bg = panel.gameObject.AddComponent<Image>();
         bg.color = new Color(0.05f, 0.12f, 0.04f, 0.3f); // 숲이 비쳐 보이게 옅은 그늘만
-        panel.gameObject.AddComponent<PointerDownRelay>().onDown = _ => StartGame(); // 화면 터치 = 시작
+        panel.gameObject.AddComponent<PointerDownRelay>().onDown = _ => OnTitleTap(); // 화면 터치 = 시작 (처음이면 조작 안내 먼저)
+
 
         // 걷는 무당벌레 (로고 위)
         var bug = NewRect("TitleLadybug", panel);
@@ -1799,13 +1804,94 @@ public class BugsBugsGame : MonoBehaviour
         Place(tapToStartText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, -90), new Vector2(460, 60));
         AddOutline(tapToStartText, IconBrown, 3f);
 
-        // 조작 한 줄 요약 (게임 화면 아래쪽)
-        var how = MakeText(panel, "DRAG : MOVE      SHIELD : TAP / HOLD", 20, Cream, TextAnchor.MiddleCenter);
-        Place(how.rectTransform, new Vector2(0.5f, 0), new Vector2(0.5f, 0.5f), new Vector2(0, 90), new Vector2(460, 30));
-        AddOutline(how, IconBrown, 1.5f);
+        // 조작법 버튼 (로비 아래쪽). 누르면 나뭇잎 카드에 조작 설명
+        Image unused;
+        var how = MakeChunkyButton(panel, "HowTo", "HOW TO PLAY", null, 24, new Vector2(230, 58), LeafGreen, () => ShowHowTo(false), out unused);
+        Place(how, new Vector2(0.5f, 0), new Vector2(0.5f, 0.5f), new Vector2(0, 110), new Vector2(230, 58));
 
         // 사운드 켜기/끄기 (타이틀에서도)
         MakeSoundButton(panel, new Vector2(-12, -12));
+    }
+
+    // ================================================================= 조작 안내 (How to Play)
+    // 로비 화면 터치 : 처음 하는 사람이면 조작 안내부터, 본 적 있으면 바로 시작
+    void OnTitleTap()
+    {
+        if (PlayerPrefs.GetInt("BugsBugs_Tutorial", 0) == 0) ShowHowTo(true);
+        else StartGame();
+    }
+
+    void ShowHowTo(bool startsGame)
+    {
+        howToStartsGame = startsGame;
+        howToButtonLabel.text = startsGame ? "START" : "OK";
+        howToPanel.SetActive(true);
+    }
+
+    void CloseHowTo()
+    {
+        howToPanel.SetActive(false);
+        PlayerPrefs.SetInt("BugsBugs_Tutorial", 1); // 한 번 봤으면 다음부터는 바로 시작
+        PlayerPrefs.Save();
+        if (howToStartsGame) StartGame();
+    }
+
+    // 나뭇잎 카드에 그림 + 한 줄 설명 4가지 + 확인 버튼
+    void BuildHowTo(Transform root)
+    {
+        var panel = Stretch(NewRect("HowToPanel", root));
+        howToPanel = panel.gameObject;
+        var bg = panel.gameObject.AddComponent<Image>();
+        bg.color = new Color(0.05f, 0.12f, 0.04f, 0.6f);
+
+        var card = NewRect("LeafCard", panel);
+        Place(card, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, 0), new Vector2(430, 620));
+        card.gameObject.AddComponent<Image>().sprite = leafSprite;
+
+        var title = MakeText(card, "HOW TO PLAY", 42, AccentYellow, TextAnchor.MiddleCenter);
+        Place(title.rectTransform, new Vector2(0.5f, 1), new Vector2(0.5f, 0.5f), new Vector2(0, -100), new Vector2(400, 56));
+        AddOutline(title, new Color(0.25f, 0.15f, 0f, 1f), 3f);
+
+        // 줄마다 : 왼쪽 그림 (작은 글자 꼬리표) + 오른쪽 설명
+        HowToRow(card, -175, new[] { playerFrames[0] }, "DRAG", "화면 아무 곳이나 끌어서\n무당벌레를 움직여요");
+        HowToRow(card, -255, new[] { shieldIcon }, "TAP", "방패를 톡! 누르면\n주변 벌레를 쾅 날려요");
+        HowToRow(card, -335, new[] { shieldIcon }, "HOLD", "방패를 꾹 누르는 동안 무적!\n(최대 2.5초, 이후 15초 대기)");
+        HowToRow(card, -415, new[] { itemOrbitSprite, itemShotSprite, pillbugSprite }, "ITEM", "꽃과 콩벌레를 먹으면\n벌레를 물리칠 수 있어요");
+
+        var goal = MakeText(card, "벌레를 피해 오래 버티세요!", 24, AccentYellow, TextAnchor.MiddleCenter);
+        Place(goal.rectTransform, new Vector2(0.5f, 1), new Vector2(0.5f, 0.5f), new Vector2(0, -478), new Vector2(400, 36));
+        AddOutline(goal, new Color(0.25f, 0.15f, 0f, 1f), 2f);
+
+        Image unused;
+        var ok = MakeChunkyButton(card, "HowToOk", "START", null, 28, new Vector2(200, 60), LeafGreen, CloseHowTo, out unused);
+        Place(ok, new Vector2(0.5f, 0), new Vector2(0.5f, 0.5f), new Vector2(0, 75), new Vector2(200, 60));
+        howToButtonLabel = ok.GetComponentInChildren<Text>();
+
+        howToPanel.SetActive(false);
+    }
+
+    void HowToRow(Transform card, float y, Sprite[] icons, string tag, string desc)
+    {
+        // 그림 (여러 개면 작게 나란히)
+        float iconSize = icons.Length > 1 ? 34f : 54f;
+        float startX = 95f - (icons.Length - 1) * iconSize * 0.5f;
+        for (int i = 0; i < icons.Length; i++)
+        {
+            var ic = NewRect("Icon", card);
+            Place(ic, new Vector2(0, 1), new Vector2(0.5f, 0.5f), new Vector2(startX + i * iconSize, y + 8f), new Vector2(iconSize, iconSize));
+            var img = ic.gameObject.AddComponent<Image>();
+            img.sprite = icons[i];
+            img.raycastTarget = false;
+        }
+        // 꼬리표 (DRAG / TAP / HOLD / ITEM)
+        var t = MakeText(card, tag, 17, AccentYellow, TextAnchor.MiddleCenter);
+        Place(t.rectTransform, new Vector2(0, 1), new Vector2(0.5f, 0.5f), new Vector2(95f, y - 30f), new Vector2(90, 22));
+        AddOutline(t, new Color(0.25f, 0.15f, 0f, 1f), 1.5f);
+        // 설명
+        var d = MakeText(card, desc, 19, Cream, TextAnchor.MiddleLeft);
+        Place(d.rectTransform, new Vector2(0, 1), new Vector2(0, 0.5f), new Vector2(150f, y), new Vector2(260, 64));
+        d.lineSpacing = 1.05f;
+        AddOutline(d, DeepGreen, 1.5f);
     }
 
     // 일시정지 화면 : 작은 나뭇잎 카드 + 계속하기 / 홈
