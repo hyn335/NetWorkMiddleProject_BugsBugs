@@ -5,7 +5,7 @@ using UnityEngine;
 // Assets/Resources/BugsBugs/Sounds/ 에 같은 이름의 소리 파일(Dash.wav 등)을 넣으면 그 소리로 교체됨.
 public class BugsSound : MonoBehaviour
 {
-    public enum Sfx { Start, Click, Dash, Shield, Item, Kill, Warn, LevelUp, Die, NewBest, Roll, Worm }
+    public enum Sfx { Start, Click, Dash, Shield, Item, Kill, Warn, LevelUp, Die, NewBest, Roll, Worm, Slam }
 
     [Range(0f, 1f)] public float volume = 0.8f;
 
@@ -13,24 +13,54 @@ public class BugsSound : MonoBehaviour
     AudioClip[] clips;
     float lastKillTime = -1f;
 
-    // 소리 끄기 (PlayerPrefs 에 저장돼서 다음에 켜도 유지)
+    // ---- 배경음악 : Assets/Resources/BugsBugs/Sounds/BGM.mp3 (또는 .ogg/.wav) 를 넣으면 계속 반복 재생
+    [Range(0f, 1f)] public float bgmVolume = 0.35f; // 효과음보다 작게
+    AudioSource bgm;
+    float bgmTarget;
+
+    // 소리 끄기 (효과음 + 배경음악, PlayerPrefs 에 저장돼서 다음에 켜도 유지)
     public bool Muted
     {
         get { return src != null && src.mute; }
         set
         {
             if (src != null) src.mute = value;
+            if (bgm != null) bgm.mute = value;
             PlayerPrefs.SetInt("BugsBugs_Mute", value ? 1 : 0);
             PlayerPrefs.Save();
         }
     }
 
+    // 일시정지 화면 등에서 배경음악을 작게 (부드럽게 줄어듦)
+    public void SetBgmDucked(bool duck)
+    {
+        bgmTarget = duck ? bgmVolume * 0.3f : bgmVolume;
+    }
+
     void Awake()
     {
+        bool muted = PlayerPrefs.GetInt("BugsBugs_Mute", 0) == 1;
         src = gameObject.AddComponent<AudioSource>();
         src.playOnAwake = false;
-        src.mute = PlayerPrefs.GetInt("BugsBugs_Mute", 0) == 1;
+        src.mute = muted;
         BuildClips();
+
+        var music = Resources.Load<AudioClip>("BugsBugs/Sounds/BGM");
+        if (music != null)
+        {
+            bgm = gameObject.AddComponent<AudioSource>();
+            bgm.clip = music;
+            bgm.loop = true;
+            bgm.playOnAwake = false;
+            bgm.mute = muted;
+            bgm.volume = bgmTarget = bgmVolume;
+            bgm.Play(); // 모바일 브라우저는 첫 터치 뒤에 소리가 나기 시작함
+        }
+    }
+
+    void Update()
+    {
+        if (bgm != null) bgm.volume = Mathf.MoveTowards(bgm.volume, bgmTarget, Time.unscaledDeltaTime * 0.8f);
     }
 
     public void Play(Sfx s)
@@ -138,6 +168,13 @@ public class BugsSound : MonoBehaviour
                 b = Buf(0.4f);
                 Add(b, 0f, 0.38f, 0f, 0f, Wave.Noise, 0.35f, amHz: 22f, amDepth: 0.9f, lowpass: 600f, attack: 0.02f, decay: 1.5f);
                 Add(b, 0f, 0.38f, 110f, 80f, Wave.Sine, 0.3f, amHz: 22f, amDepth: 0.7f, decay: 1.5f);
+                break;
+
+            case Sfx.Slam: // 방패 쾅! (묵직하게 땅 치는 소리 + 흙 튀는 소리 + 나무 울림)
+                b = Buf(0.45f);
+                Add(b, 0f, 0.35f, 170f, 45f, Wave.Sine, 0.6f, decay: 2.2f);
+                Add(b, 0f, 0.22f, 0f, 0f, Wave.Noise, 0.38f, lowpass: 800f, decay: 3f);
+                Add(b, 0.005f, 0.08f, 600f, 300f, Wave.Sine, 0.25f, decay: 4f);
                 break;
 
             case Sfx.Worm: // 지렁이 "꾸물꾸물" (흙 속에서 부스럭 + 낮게 꿀렁)

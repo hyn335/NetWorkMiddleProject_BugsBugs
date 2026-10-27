@@ -427,6 +427,21 @@ public static class BugsArt
         return Paint(Clear, Color.white, Mathf.Min(ring, head));
     }
 
+    public static Color IconPause(int x, int y, int w, int h)
+    {
+        float s = w; Vector2 p = new Vector2(x, y);
+        float a = RoundBox(p, new Vector2(0.35f * s, 0.5f * s), new Vector2(0.08f * s, 0.26f * s), 0.04f * s);
+        float b = RoundBox(p, new Vector2(0.65f * s, 0.5f * s), new Vector2(0.08f * s, 0.26f * s), 0.04f * s);
+        return Paint(Clear, Color.white, Mathf.Min(a, b));
+    }
+
+    public static Color IconPlay(int x, int y, int w, int h)
+    {
+        float s = w; Vector2 p = new Vector2(x, y);
+        float t = Tri(p, new Vector2(0.32f * s, 0.2f * s), new Vector2(0.32f * s, 0.8f * s), new Vector2(0.8f * s, 0.5f * s)) - 0.04f * s;
+        return Paint(Clear, Color.white, t);
+    }
+
     public static Color IconSound(int x, int y, int w, int h, bool on)
     {
         float s = w; Vector2 p = new Vector2(x, y);

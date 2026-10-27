@@ -39,7 +39,7 @@ public class BugsBugsGame : MonoBehaviour
     [Header("Obstacles")]
     public float startFallSpeed = 2f;   // 처음 낙하 속도
     public float fallSpeedGain = 0.04f; // 1초마다 늘어나는 낙하 속도
-    public float maxFallSpeed = 7.5f;
+    public float maxFallSpeed = 6f;   // 후반 낙하 속도 상한 (플레이어 이동 3.0 에 맞춰 낮춤)
     public float startSpawnInterval = 0.9f;
     public float minSpawnInterval = 0.3f;
     public float rampSeconds = 120f;    // 이 시간 동안 생성 간격이 점점 짧아짐
@@ -83,7 +83,9 @@ public class BugsBugsGame : MonoBehaviour
 
     [Header("Shield")]
     public float shieldMaxEnergy = 2.5f;   // 게이지가 꽉 찼을 때 버틸 수 있는 무적 시간 (초)
-    public float shieldCooldown = 30f;     // 한 번 쓰고 나면 못 쓰는 시간 (초)
+    public float shieldCooldown = 15f;     // 한 번 쓰고 나면 못 쓰는 시간 (초)
+    public float shieldTapTime = 0.25f;    // 이 시간 안에 떼면 "톡" = 방패 쾅!
+    public float slamRadius = 1.3f;        // 방패 쾅이 벌레를 날려버리는 범위
 
     [Header("Items (Flower)")]
     public float itemIntervalMin = 3.5f; // 아이템 간격 3.5~7초 중 랜덤 (첫 아이템도)
@@ -129,7 +131,7 @@ public class BugsBugsGame : MonoBehaviour
     static readonly Color AccentYellow  = new Color32(0xFF, 0xD8, 0x4A, 0xFF);
 
     // ------------------------------------------------------------ 상태
-    enum State { Title, Playing, Dying, Result }
+    enum State { Title, Playing, Paused, Dying, Result }
     State state;
 
     enum BugKind { Basic, Zigzag, Chaser, Charger, ChargerDown }
@@ -228,6 +230,7 @@ public class BugsBugsGame : MonoBehaviour
 
     float elapsed, spawnTimer, shieldEnergy, shieldCdTimer, dyingTimer, shakeTimer;
     bool shieldOn, shieldNeedRelease;
+    float shieldPressT; // 실드 버튼을 누른 뒤 지난 시간 (톡 / 꾹 구분)
     int score, best;
     Vector2 lastMoveDir = Vector2.up; // 멈춰 있을 때 대시 방향
 
@@ -235,7 +238,12 @@ public class BugsBugsGame : MonoBehaviour
     Font font;
     bool customFont; // Resources 의 폰트 파일을 쓰는 중인지
     Sprite uiCircle;
-    GameObject hud, titlePanel, resultPanel;
+    GameObject hud, titlePanel, resultPanel, pausePanel;
+    Text hintText;      // 조작 안내 (게임 시작 때)
+    Text resultScoreLabel;
+    float hintTimer;
+    Image titleBug;              // 타이틀의 걷는 무당벌레
+    readonly List<Image> soundIcons = new List<Image>(); // 타이틀·게임 화면 사운드 아이콘 (같이 바뀜)
     Text levelText;
     Text scoreText, tapToStartText, titleBestText, resultScoreText, resultBestText, newBestText;
     // true : 레이디버그식 드래그 조작 (화면 아무 데나 끌면 그만큼 이동) / false : 가상 조이스틱
@@ -246,8 +254,7 @@ public class BugsBugsGame : MonoBehaviour
     Image shieldButtonImg, shieldGauge, shieldIconImg;
     Text shieldCdText; // 쿨타임 남은 초
     HoldButton shieldHold;
-    Sprite chunkySprite, chunkyCircleSprite, ringSprite, leafSprite, shieldIcon, iconHome, iconRetry, iconSoundOn, iconSoundOff;
-    Image soundIcon;
+    Sprite chunkySprite, chunkyCircleSprite, ringSprite, leafSprite, shieldIcon, iconHome, iconRetry, iconSoundOn, iconSoundOff, iconPause, iconPlay;
     static readonly Color Wood       = new Color32(0xD0, 0x95, 0x5C, 0xFF);
     static readonly Color LeafGreen  = new Color32(0x84, 0xCF, 0x5E, 0xFF);
     static readonly Color Cream      = new Color32(0xFF, 0xF6, 0xDC, 0xFF);
@@ -318,6 +325,8 @@ public class BugsBugsGame : MonoBehaviour
         iconRetry = BugsArt.Bake(64, 64, BugsArt.IconRetry, 100f);
         iconSoundOn = BugsArt.Bake(64, 64, (x, y, w, h) => BugsArt.IconSound(x, y, w, h, true), 100f);
         iconSoundOff = BugsArt.Bake(64, 64, (x, y, w, h) => BugsArt.IconSound(x, y, w, h, false), 100f);
+        iconPause = BugsArt.Bake(64, 64, BugsArt.IconPause, 100f);
+        iconPlay = BugsArt.Bake(64, 64, BugsArt.IconPlay, 100f);
 
         // Assets/Resources/BugsBugs/Obstacle.png 를 넣으면 그 그림으로 교체됨 (그림 파일은 다리 움직임 없이 한 장)
         // ObstacleZigzag.png / ObstacleChaser.png / ObstacleCharger.png(지렁이) / ObstacleSpider.png 도 같은 방식
@@ -537,8 +546,30 @@ public class BugsBugsGame : MonoBehaviour
         ResetPlayer();
         hud.SetActive(false);
         resultPanel.SetActive(false);
+        pausePanel.SetActive(false);
+        sound.SetBgmDucked(false);
         titlePanel.SetActive(true);
-        titleBestText.text = "BEST  " + best;
+        titleBestText.text = "BEST " + best;
+    }
+
+    // 일시정지 (HUD 의 일시정지 버튼 / ESC 키). HOME 은 일시정지 화면 안에서만 → 실수로 판이 끝나지 않음
+    void PauseGame()
+    {
+        if (state != State.Playing) return;
+        state = State.Paused;
+        ResetMoveInput();
+        if (shieldHold != null) shieldHold.Release();
+        pausePanel.SetActive(true);
+        sound.SetBgmDucked(true);
+    }
+
+    void ResumeGame()
+    {
+        if (state != State.Paused) return;
+        pausePanel.SetActive(false);
+        sound.SetBgmDucked(false);
+        ResetMoveInput();
+        state = State.Playing;
     }
 
     void StartGame()
@@ -563,7 +594,11 @@ public class BugsBugsGame : MonoBehaviour
         scoreText.text = "SCORE 0";
         titlePanel.SetActive(false);
         resultPanel.SetActive(false);
+        pausePanel.SetActive(false);
         hud.SetActive(true);
+        // 조작 안내 : 처음 움직일 때까지 (최대 5초) 보여줌
+        hintTimer = 5f;
+        hintText.gameObject.SetActive(true);
         ResetMoveInput();
         state = State.Playing;
         sound.Play(BugsSound.Sfx.Start);
@@ -606,6 +641,7 @@ public class BugsBugsGame : MonoBehaviour
         resultScoreText.text = score.ToString();
         resultBestText.text = "BEST " + best;
         newBestText.gameObject.SetActive(isNewBest);
+        resultScoreLabel.gameObject.SetActive(!isNewBest);
         if (isNewBest) sound.Play(BugsSound.Sfx.NewBest);
     }
 
@@ -621,13 +657,22 @@ public class BugsBugsGame : MonoBehaviour
                 var c = tapToStartText.color;
                 c.a = 0.55f + 0.45f * Mathf.Sin(Time.unscaledTime * 4f);
                 tapToStartText.color = c;
+                // 타이틀 무당벌레 : 제자리에서 걷듯 다리를 움직이며 살랑
+                titleBug.sprite = playerFrames[BugsArt.WalkCycle[(int)(Time.unscaledTime * 8f) % 4]];
+                titleBug.rectTransform.localRotation = Quaternion.Euler(0f, 0f, Mathf.Sin(Time.unscaledTime * 2f) * 12f);
                 break;
             case State.Playing:
+                if (KeyboardPausePressed()) { PauseGame(); break; }
                 UpdatePlaying(dt);
+                UpdateSquash(dt);
+                break;
+            case State.Paused:
+                if (KeyboardPausePressed()) ResumeGame();
                 break;
             case State.Dying:
                 dyingTimer -= dt;
                 playerSr.enabled = Mathf.Repeat(dyingTimer, 0.16f) > 0.08f; // 깜빡임
+                UpdateSquash(dt);
                 if (dyingTimer <= 0f) { playerSr.enabled = true; ShowResult(); }
                 break;
         }
@@ -662,6 +707,17 @@ public class BugsBugsGame : MonoBehaviour
         Vector3 p = player.position;
         p += (Vector3)(input * moveSpeed * dt + drag); // 드래그는 손가락이 움직인 만큼 그대로
         player.position = ClampToField(p);
+
+        // ---- 조작 안내 : 한 번 움직이면 곧 사라짐
+        if (hintTimer > 0f)
+        {
+            if (input.sqrMagnitude > 0.01f || drag.sqrMagnitude > 0.0001f) hintTimer = Mathf.Min(hintTimer, 0.4f);
+            hintTimer -= dt;
+            var hc = hintText.color;
+            hc.a = Mathf.Clamp01(hintTimer / 0.4f) * (0.75f + 0.25f * Mathf.Sin(Time.time * 5f));
+            hintText.color = hc;
+            if (hintTimer <= 0f) hintText.gameObject.SetActive(false);
+        }
 
         // 무당벌레가 움직이는 방향을 바라보게 (부드럽게 회전)
         if (input.sqrMagnitude > 0.01f || drag.sqrMagnitude > 0.0001f)
@@ -772,6 +828,7 @@ public class BugsBugsGame : MonoBehaviour
 
             if (PetalHits(op, o.half * 0.6f))
             {
+                SpawnSquash(o);
                 Recycle(i);
                 bonusScore += killBonus;
                 sound.Play(BugsSound.Sfx.Kill);
@@ -880,7 +937,7 @@ public class BugsBugsGame : MonoBehaviour
         while (level + 1 < Levels.Length && score >= Levels[level + 1].score)
         {
             level++;
-            levelText.text = "LEVEL " + (level + 1) + "\n" + Levels[level].title;
+            levelText.text = "LEVEL " + (level + 1); // 레벨 숫자만 (벌레 이름 문구는 뺌)
             levelText.gameObject.SetActive(true);
             levelBannerTimer = 2f;
             sound.Play(BugsSound.Sfx.LevelUp);
@@ -1031,6 +1088,7 @@ public class BugsBugsGame : MonoBehaviour
         orbitTimer = 0f;
         shotTimer = 0f;
         foreach (var p in orbitPetals) p.gameObject.SetActive(false);
+        ClearSquash();
     }
 
     // ================================================================= 꽃 아이템
@@ -1304,9 +1362,11 @@ public class BugsBugsGame : MonoBehaviour
         return false;
     }
 
-    // ================================================================= 실드 (Hold)
-    // 버튼(또는 스페이스바)을 누르고 있는 동안 무적, 최대 shieldMaxEnergy 초.
-    // 손을 떼거나 다 쓰면 shieldCooldown 초 동안 못 씀 -> 쿨타임이 끝나면 게이지가 다시 꽉 참.
+    // ================================================================= 실드 (Click = 쾅 / Hold = 무적)
+    // 버튼(또는 스페이스바)을 누르는 순간 무적이 켜짐.
+    //  - 짧게 톡 (shieldTapTime 초 안에 뗌) = 방패 쾅! 주변 벌레를 한 번에 날려버림 (Click)
+    //  - 꾹 누르기 = 누르고 있는 동안 무적, 최대 shieldMaxEnergy 초 (Hold)
+    // 어느 쪽이든 끝나면 shieldCooldown 초 동안 못 씀 -> 쿨타임이 끝나면 게이지가 다시 꽉 참.
     // 쿨타임이 끝났을 때 아직 누르고 있으면 한 번 뗐다가 다시 눌러야 켜짐 (실수로 바로 켜지는 것 방지)
     void UpdateShield(float dt)
     {
@@ -1321,12 +1381,19 @@ public class BugsBugsGame : MonoBehaviour
 
         if (shieldOn)
         {
+            shieldPressT += dt;
             shieldEnergy -= dt;
-            if (!want || shieldEnergy <= 0f) EndShield(); // 손을 뗐거나 다 씀 -> 쿨타임 시작
+            if (!want)
+            {
+                if (shieldPressT < shieldTapTime) Slam(); // 짧게 톡 = 쾅
+                EndShield();
+            }
+            else if (shieldEnergy <= 0f) EndShield(); // 꾹 누르다가 다 씀
         }
         else if (want && !shieldNeedRelease && shieldCdTimer <= 0f)
         {
             shieldOn = true;
+            shieldPressT = 0f;
             sound.Play(BugsSound.Sfx.Shield);
         }
 
@@ -1341,6 +1408,109 @@ public class BugsBugsGame : MonoBehaviour
         shieldEnergy = 0f;
         shieldCdTimer = shieldCooldown;
         shieldNeedRelease = true;
+    }
+
+    // 방패 쾅! : 플레이어 주변 slamRadius 안의 벌레를 전부 날려버림 + 퍼지는 충격파
+    void Slam()
+    {
+        Vector2 pc = player.position;
+        int kills = 0;
+        for (int i = obstacles.Count - 1; i >= 0; i--)
+        {
+            var o = obstacles[i];
+            float r = slamRadius + o.half * 0.4f;
+            if (((Vector2)o.tr.position - pc).sqrMagnitude < r * r)
+            {
+                SpawnSquash(o);
+                Recycle(i);
+                kills++;
+            }
+        }
+        bonusScore += kills * killBonus;
+        sound.Play(BugsSound.Sfx.Slam);
+        shakeTimer = Mathf.Max(shakeTimer, 0.2f);
+        StartShockwave(pc);
+    }
+
+    // ---- 충격파 고리 (흙빛 고리가 퍼지며 사라짐)
+    SpriteRenderer shockwave;
+    float shockT;
+
+    void StartShockwave(Vector2 pos)
+    {
+        if (shockwave == null)
+        {
+            var go = new GameObject("Shockwave");
+            shockwave = go.AddComponent<SpriteRenderer>();
+            shockwave.sprite = BugsArt.Bake(128, 128, BugsArt.Ring, 128f);
+            shockwave.sortingOrder = 9;
+        }
+        shockwave.transform.position = pos;
+        shockwave.gameObject.SetActive(true);
+        shockT = 0f;
+        UpdateShockwave(0f);
+    }
+
+    void UpdateShockwave(float dt)
+    {
+        if (shockwave == null || !shockwave.gameObject.activeSelf) return;
+        shockT += dt;
+        float k = Mathf.Clamp01(shockT / 0.35f);
+        shockwave.transform.position = player.position;
+        shockwave.transform.localScale = Vector3.one * Mathf.Lerp(0.4f, slamRadius * 2.2f, 1f - (1f - k) * (1f - k));
+        shockwave.color = new Color(0.98f, 0.92f, 0.75f, 0.9f * (1f - k));
+        if (k >= 1f) shockwave.gameObject.SetActive(false);
+    }
+
+    // ================================================================= 처치 연출 : 납작하게 찌그러지며 사라짐
+    class Squash { public SpriteRenderer sr; public Vector3 baseScale; public float t; }
+    readonly List<Squash> squashes = new List<Squash>();
+    readonly Stack<Squash> squashPool = new Stack<Squash>();
+
+    void SpawnSquash(Obstacle o)
+    {
+        Squash s;
+        if (squashPool.Count > 0) s = squashPool.Pop();
+        else
+        {
+            var go = new GameObject("Squash");
+            s = new Squash { sr = go.AddComponent<SpriteRenderer>() };
+            s.sr.sortingOrder = 1;
+        }
+        s.sr.sprite = o.sr.sprite;
+        s.sr.transform.position = o.tr.position;
+        s.sr.transform.rotation = o.tr.rotation;
+        s.baseScale = o.tr.localScale;
+        s.t = 0f;
+        s.sr.gameObject.SetActive(true);
+        squashes.Add(s);
+    }
+
+    void UpdateSquash(float dt)
+    {
+        UpdateShockwave(dt);
+        for (int i = squashes.Count - 1; i >= 0; i--)
+        {
+            var s = squashes[i];
+            s.t += dt;
+            float k = Mathf.Clamp01(s.t / 0.3f);
+            // 옆으로 퍼지고 위아래로 납작해짐 (그림 기준), 색은 어두워지며 투명해짐
+            s.sr.transform.localScale = new Vector3(s.baseScale.x * (1f + 0.45f * k), s.baseScale.y * (1f - 0.75f * k), 1f);
+            s.sr.color = new Color(1f - 0.4f * k, 1f - 0.4f * k, 1f - 0.4f * k, 1f - k);
+            if (k >= 1f)
+            {
+                squashes.RemoveAt(i);
+                s.sr.gameObject.SetActive(false);
+                squashPool.Push(s);
+            }
+        }
+    }
+
+    void ClearSquash()
+    {
+        foreach (var s in squashes) { s.sr.gameObject.SetActive(false); squashPool.Push(s); }
+        squashes.Clear();
+        if (shockwave != null) shockwave.gameObject.SetActive(false);
     }
 
     void UpdateShieldButton()
@@ -1391,6 +1561,17 @@ public class BugsBugsGame : MonoBehaviour
         return new Vector2(x, y);
 #else
         return new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+#endif
+    }
+
+    // ESC 또는 P : 일시정지 / 계속하기
+    static bool KeyboardPausePressed()
+    {
+#if ENABLE_INPUT_SYSTEM && !ENABLE_LEGACY_INPUT_MANAGER
+        var k = Keyboard.current;
+        return k != null && (k.escapeKey.wasPressedThisFrame || k.pKey.wasPressedThisFrame);
+#else
+        return Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.P);
 #endif
     }
 
@@ -1446,6 +1627,7 @@ public class BugsBugsGame : MonoBehaviour
         BuildHud(root);
         BuildTitle(root);
         BuildResult(root);
+        BuildPause(root);
 
         // 받아 온 폰트는 이미 굵은 글꼴이라, 유니티가 억지로 한 번 더 굵게 하면 글자가 뭉개짐 -> 굵게 끄기
         if (customFont)
@@ -1468,14 +1650,19 @@ public class BugsBugsGame : MonoBehaviour
         AddOutline(levelText, new Color(0.25f, 0.15f, 0f, 1f), 2.5f);
         levelText.gameObject.SetActive(false);
 
-        // 홈 버튼 (우측 상단, 나무 버튼 + 집 아이콘)
+        // 일시정지 버튼 (우측 상단). HOME 은 일시정지 화면 안에 있어서 실수로 판이 끝나지 않음
         Image unused;
-        var home = MakeChunkyButton(hud.transform, "Home", null, iconHome, 0, new Vector2(58, 58), Wood, GoTitle, out unused);
-        Place(home, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-12, -12), new Vector2(58, 58));
+        var pause = MakeChunkyButton(hud.transform, "Pause", null, iconPause, 0, new Vector2(58, 58), Wood, PauseGame, out unused);
+        Place(pause, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-12, -12), new Vector2(58, 58));
 
-        // 사운드 켜기/끄기 (홈 버튼 왼쪽)
-        var snd = MakeChunkyButton(hud.transform, "Sound", null, sound.Muted ? iconSoundOff : iconSoundOn, 0, new Vector2(58, 58), Wood, ToggleSound, out soundIcon);
-        Place(snd, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-78, -12), new Vector2(58, 58));
+        // 사운드 켜기/끄기 (일시정지 버튼 왼쪽, 간격을 넉넉히)
+        MakeSoundButton(hud.transform, new Vector2(-84, -12));
+
+        // 조작 안내 (게임 시작 때 화면 아래쪽, 한 번 움직이면 사라짐)
+        hintText = MakeText(hud.transform, "DRAG ANYWHERE TO MOVE", 28, Cream, TextAnchor.MiddleCenter);
+        Place(hintText.rectTransform, new Vector2(0.5f, 0), new Vector2(0.5f, 0.5f), new Vector2(0, 250), new Vector2(460, 40));
+        AddOutline(hintText, IconBrown, 2.5f);
+        hintText.gameObject.SetActive(false);
 
         // 레이디버그식 드래그 조작 : 화면 전체가 터치 영역 (맨 뒤에 깔아서 버튼이 먼저 눌리게)
         if (useDragControl)
@@ -1529,6 +1716,11 @@ public class BugsBugsGame : MonoBehaviour
         Stretch(shieldCdText.rectTransform);
         shieldCdText.rectTransform.offsetMin = new Vector2(0f, 6f);
         AddOutline(shieldCdText, IconBrown, 2.5f);
+
+        // 조작 안내 : 톡 = 쾅 / 꾹 = 무적 (버튼 바로 아래 작게)
+        var how = MakeText(shieldRt, "TAP / HOLD", 15, Cream, TextAnchor.MiddleCenter);
+        Place(how.rectTransform, new Vector2(0.5f, 0), new Vector2(0.5f, 0.5f), new Vector2(0, -6), new Vector2(160, 22));
+        AddOutline(how, IconBrown, 1.5f);
     }
 
     // 가상 조이스틱 (useDragControl = false 일 때)
@@ -1574,21 +1766,80 @@ public class BugsBugsGame : MonoBehaviour
         var panel = Stretch(NewRect("TitlePanel", root));
         titlePanel = panel.gameObject;
         var bg = panel.gameObject.AddComponent<Image>();
-        bg.color = new Color(0.08f, 0.15f, 0.08f, 0.55f);
+        bg.color = new Color(0.05f, 0.12f, 0.04f, 0.3f); // 숲이 비쳐 보이게 옅은 그늘만
         panel.gameObject.AddComponent<PointerDownRelay>().onDown = _ => StartGame(); // 화면 터치 = 시작
 
-        var title = MakeText(panel, "BugsBugs", 84, AccentYellow, TextAnchor.MiddleCenter);
-        Place(title.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, 170), new Vector2(460, 120));
-        title.fontStyle = FontStyle.Bold;
-        AddOutline(title, new Color(0.25f, 0.15f, 0f, 1f), 3f);
+        // 걷는 무당벌레 (로고 위)
+        var bug = NewRect("TitleLadybug", panel);
+        Place(bug, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, 270), new Vector2(130, 130));
+        titleBug = bug.gameObject.AddComponent<Image>();
+        titleBug.sprite = playerFrames[0];
+        titleBug.raycastTarget = false;
 
-        tapToStartText = MakeText(panel, "TAP TO START", 38, Color.white, TextAnchor.MiddleCenter);
-        Place(tapToStartText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, -20), new Vector2(460, 60));
-        tapToStartText.fontStyle = FontStyle.Bold;
-        AddOutline(tapToStartText, new Color(0, 0, 0, 0.6f), 2f);
+        // 로고
+        var title = MakeText(panel, "BugsBugs", 88, AccentYellow, TextAnchor.MiddleCenter);
+        Place(title.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, 150), new Vector2(460, 120));
+        AddOutline(title, new Color(0.25f, 0.15f, 0f, 1f), 4f);
 
-        titleBestText = MakeText(panel, "BEST  0", 26, Color.white, TextAnchor.MiddleCenter);
-        Place(titleBestText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, -80), new Vector2(460, 40));
+        // 최고 점수 : 나무 팻말
+        var plank = NewRect("BestPlank", panel);
+        Place(plank, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, 55), new Vector2(230, 56));
+        var plankImg = plank.gameObject.AddComponent<Image>();
+        plankImg.sprite = chunkySprite;
+        plankImg.type = Image.Type.Sliced;
+        plankImg.pixelsPerUnitMultiplier = 100f / 56f;
+        plankImg.color = Wood;
+        plankImg.raycastTarget = false;
+        titleBestText = MakeText(plank, "BEST 0", 26, Cream, TextAnchor.MiddleCenter);
+        Stretch(titleBestText.rectTransform);
+        titleBestText.rectTransform.offsetMin = new Vector2(0f, 4f);
+        AddOutline(titleBestText, IconBrown, 2f);
+
+        tapToStartText = MakeText(panel, "TAP TO START", 40, Cream, TextAnchor.MiddleCenter);
+        Place(tapToStartText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, -90), new Vector2(460, 60));
+        AddOutline(tapToStartText, IconBrown, 3f);
+
+        // 조작 한 줄 요약 (게임 화면 아래쪽)
+        var how = MakeText(panel, "DRAG : MOVE      SHIELD : TAP / HOLD", 20, Cream, TextAnchor.MiddleCenter);
+        Place(how.rectTransform, new Vector2(0.5f, 0), new Vector2(0.5f, 0.5f), new Vector2(0, 90), new Vector2(460, 30));
+        AddOutline(how, IconBrown, 1.5f);
+
+        // 사운드 켜기/끄기 (타이틀에서도)
+        MakeSoundButton(panel, new Vector2(-12, -12));
+    }
+
+    // 일시정지 화면 : 작은 나뭇잎 카드 + 계속하기 / 홈
+    void BuildPause(Transform root)
+    {
+        var panel = Stretch(NewRect("PausePanel", root));
+        pausePanel = panel.gameObject;
+        var bg = panel.gameObject.AddComponent<Image>();
+        bg.color = new Color(0.05f, 0.12f, 0.04f, 0.55f);
+
+        var card = NewRect("LeafCard", panel);
+        Place(card, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, 10), new Vector2(320, 396));
+        card.gameObject.AddComponent<Image>().sprite = leafSprite;
+
+        var t = MakeText(card, "PAUSED", 50, AccentYellow, TextAnchor.MiddleCenter);
+        Place(t.rectTransform, new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -80), new Vector2(300, 64));
+        AddOutline(t, new Color(0.25f, 0.15f, 0f, 1f), 3f);
+
+        Image unused;
+        var resume = MakeChunkyButton(card, "Resume", "PLAY", iconPlay, 26, new Vector2(210, 60), LeafGreen, ResumeGame, out unused);
+        Place(resume, new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 128), new Vector2(210, 60));
+        var home = MakeChunkyButton(card, "Home", "HOME", iconHome, 26, new Vector2(210, 60), Wood, GoTitle, out unused);
+        Place(home, new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 54), new Vector2(210, 60));
+
+        pausePanel.SetActive(false);
+    }
+
+    // 사운드 버튼 (타이틀·게임 화면 둘 다). 아이콘은 soundIcons 에 모아서 같이 바꿈
+    void MakeSoundButton(Transform parent, Vector2 pos)
+    {
+        Image icon;
+        var b = MakeChunkyButton(parent, "Sound", null, sound.Muted ? iconSoundOff : iconSoundOn, 0, new Vector2(58, 58), Wood, ToggleSound, out icon);
+        Place(b, new Vector2(1, 1), new Vector2(1, 1), pos, new Vector2(58, 58));
+        soundIcons.Add(icon);
     }
 
     void BuildResult(Transform root)
@@ -1616,9 +1867,14 @@ public class BugsBugsGame : MonoBehaviour
         Place(over.rectTransform, new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -68), new Vector2(360, 64));
         AddOutline(over, new Color(0.25f, 0.15f, 0f, 1f), 3f);
 
-        var scoreLabel = MakeText(card, "SCORE", 22, Cream, TextAnchor.MiddleCenter);
-        Place(scoreLabel.rectTransform, new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -138), new Vector2(360, 30));
-        AddOutline(scoreLabel, DeepGreen, 1.5f);
+        resultScoreLabel = MakeText(card, "SCORE", 22, Cream, TextAnchor.MiddleCenter);
+        Place(resultScoreLabel.rectTransform, new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -138), new Vector2(360, 30));
+        AddOutline(resultScoreLabel, DeepGreen, 1.5f);
+
+        // 최고 기록이면 "SCORE" 자리에 대신 나옴 (줄을 따로 쓰지 않아 버튼과 겹치지 않음)
+        newBestText = MakeText(card, "NEW BEST!", 26, AccentYellow, TextAnchor.MiddleCenter);
+        Place(newBestText.rectTransform, new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -136), new Vector2(360, 34));
+        AddOutline(newBestText, new Color(0.45f, 0.2f, 0f, 1f), 2f);
 
         resultScoreText = MakeText(card, "0", 60, Color.white, TextAnchor.MiddleCenter);
         Place(resultScoreText.rectTransform, new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -166), new Vector2(360, 66));
@@ -1628,10 +1884,6 @@ public class BugsBugsGame : MonoBehaviour
         Place(resultBestText.rectTransform, new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -234), new Vector2(360, 30));
         AddOutline(resultBestText, DeepGreen, 1.5f);
 
-        newBestText = MakeText(card, "NEW BEST!", 26, AccentYellow, TextAnchor.MiddleCenter);
-        Place(newBestText.rectTransform, new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(0, -266), new Vector2(360, 34));
-        newBestText.rectTransform.localRotation = Quaternion.Euler(0f, 0f, 4f);
-        AddOutline(newBestText, new Color(0.45f, 0.2f, 0f, 1f), 2f);
 
         Image unused;
         var retry = MakeChunkyButton(card, "Retry", "RETRY", iconRetry, 26, new Vector2(230, 60), LeafGreen, StartGame, out unused);
@@ -1735,6 +1987,6 @@ public class BugsBugsGame : MonoBehaviour
     void ToggleSound()
     {
         sound.Muted = !sound.Muted;
-        soundIcon.sprite = sound.Muted ? iconSoundOff : iconSoundOn;
+        foreach (var icon in soundIcons) icon.sprite = sound.Muted ? iconSoundOff : iconSoundOn;
     }
 }
