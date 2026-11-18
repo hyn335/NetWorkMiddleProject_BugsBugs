@@ -18,12 +18,12 @@ public class ScoreSaver : MonoBehaviour
 
     IEnumerator Put(int score)
     {
-        string url = dbUrl + "/scores/" + AuthManager.Uid + ".json?auth=" + AuthManager.IdToken;
+        string url = dbUrl.TrimEnd('/') + "/scores/" + AuthManager.Uid + ".json?auth=" + AuthManager.IdToken;   // 주소 끝에 / 가 있어도 //scores 가 되지 않게
         UnityWebRequest get = UnityWebRequest.Get(url);
         yield return get.SendWebRequest();          // 서버에 있는 내 기록을 먼저 읽음. 없으면 null
         string old = get.downloadHandler.text;
         int best = old.StartsWith("{") ? JsonUtility.FromJson<ScoreData>(old).score : 0;
-        if (score <= best) { busy = false; yield break; }  // 서버 기록이 더 높으면 덮어쓰지 않음
+        if (score <= best) { Debug.Log("not saved: server best " + best + " >= " + score); busy = false; yield break; }  // 서버 기록이 더 높으면 덮어쓰지 않음
         string body = "{\"name\":\"" + AuthManager.Name + "\",\"score\":" + score + "}";
         UnityWebRequest req = UnityWebRequest.Put(url, body);
         req.SetRequestHeader("Content-Type", "application/json");

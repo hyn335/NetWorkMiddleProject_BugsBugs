@@ -658,9 +658,10 @@ public class BugsBugsGame : MonoBehaviour
             best = score;
             PlayerPrefs.SetInt("BugsBugs_Best", best);
             PlayerPrefs.Save();
-
-            ScoreSaver.Instance.Save(best);
         }
+        // 로그인했으면 이번 판 점수를 서버로 보냄 (매 판). ScoreSaver 가 서버의 내 기록과 비교해서 더 높을 때만 저장.
+        // 이 브라우저의 최고 기록(PlayerPrefs)은 손님마다 따로가 아니라서, 그걸 넘을 때만 보내면 새 손님 기록이 안 올라감
+        if (ScoreSaver.Instance != null) ScoreSaver.Instance.Save(score);
         hud.SetActive(false);
         resultPanel.SetActive(true);
         resultScoreText.text = score.ToString();
@@ -1834,6 +1835,13 @@ public class BugsBugsGame : MonoBehaviour
         // 사운드 켜기/끄기 (타이틀에서도)
         MakeSoundButton(panel, new Vector2(-12, -12));
 
+        // 로그아웃 (왼쪽 위, 글자 버튼) + 로그인한 이름
+        var logout = MakeChunkyButton(panel, "Logout", "LOGOUT", null, 22, new Vector2(140, 52), Wood, Logout, out unused);
+        Place(logout, new Vector2(0, 1), new Vector2(0, 1), new Vector2(12, -15), new Vector2(140, 52));
+        var who = MakeText(panel, AuthManager.Name, 20, Cream, TextAnchor.MiddleLeft);
+        Place(who.rectTransform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(18, -72), new Vector2(300, 28));
+        AddOutline(who, IconBrown, 1.5f);
+
         // 버전 (발표 자료의 버전과 같게 유지, 왼쪽 아래 작게)
         var ver = MakeText(panel, GameVersion, 20, Cream, TextAnchor.MiddleLeft);
         Place(ver.rectTransform, new Vector2(0, 0), new Vector2(0, 0), new Vector2(16, 12), new Vector2(160, 28));
@@ -1946,7 +1954,17 @@ public class BugsBugsGame : MonoBehaviour
         var home = MakeChunkyButton(card, "Home", "HOME", iconHome, 26, new Vector2(210, 60), Wood, GoTitle, out unused);
         Place(home, new Vector2(0.5f, 0), new Vector2(0.5f, 0), new Vector2(0, 54), new Vector2(210, 60));
 
+        // 로그아웃 (나뭇잎 카드 아래)
+        var logout = MakeChunkyButton(panel, "Logout", "LOGOUT", null, 22, new Vector2(160, 52), Wood, Logout, out unused);
+        Place(logout, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0, -245), new Vector2(160, 52));
+
         pausePanel.SetActive(false);
+    }
+
+    // 로그아웃 : 로그인 정보를 지우고 Login 씬으로 (AuthManager 가 처리)
+    void Logout()
+    {
+        AuthManager.Logout();
     }
 
     // 사운드 버튼 (타이틀·게임 화면 둘 다). 아이콘은 soundIcons 에 모아서 같이 바꿈
