@@ -21,7 +21,7 @@ using UnityEngine.InputSystem.UI;
 public class BugsBugsGame : MonoBehaviour
 {
     // false 로 바꾸면 자동 생성이 꺼집니다 (직접 빈 오브젝트에 붙여서 쓰고 싶을 때)
-    public static bool AutoCreate = true;
+    public static bool AutoCreate = false;
     static BugsBugsGame instance;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -638,6 +638,8 @@ public class BugsBugsGame : MonoBehaviour
             best = score;
             PlayerPrefs.SetInt("BugsBugs_Best", best);
             PlayerPrefs.Save();
+
+            ScoreSaver.Instance.Save(best);
         }
         hud.SetActive(false);
         resultPanel.SetActive(true);
