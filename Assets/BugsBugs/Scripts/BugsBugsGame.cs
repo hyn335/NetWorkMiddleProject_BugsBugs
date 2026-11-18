@@ -223,6 +223,8 @@ public class BugsBugsGame : MonoBehaviour
     public float groundScrollSpeed = 0.6f;
     readonly Transform[] groundTiles = new Transform[2];
     float groundTileH;
+    Vector2 groundSpriteSize;
+    float groundFitHalfW; // 배경을 마지막으로 맞춘 화면 반폭
     SpriteRenderer playerSr;
     SpriteRenderer shieldSr;
     Sprite[] playerFrames;  // 무당벌레 걸음 그림 3장
@@ -503,23 +505,41 @@ public class BugsBugsGame : MonoBehaviour
         // Ground.png 를 넣으면 그 그림으로 (위아래가 이어지는 그림이어야 자연스러움)
         Sprite sprite = Resources.Load<Sprite>("BugsBugs/Ground");
         if (sprite == null) sprite = BugsArt.Bake(192, 384, BugsArt.Ground, 192f); // 가로 1유닛짜리
-        Vector2 size = sprite.bounds.size;
-        float scale = halfW * 2f / size.x * 1.02f;   // 화면 폭에 맞춤
-        groundTileH = size.y * scale;
+        groundSpriteSize = sprite.bounds.size;
         for (int i = 0; i < groundTiles.Length; i++)
         {
             var go = new GameObject("Ground" + i);
             var sr = go.AddComponent<SpriteRenderer>();
             sr.sprite = sprite;
             sr.sortingOrder = -10;
-            go.transform.localScale = Vector3.one * scale;
-            go.transform.position = new Vector3(0f, i * groundTileH, 0f);
             groundTiles[i] = go.transform;
         }
+        FitGround();
+    }
+
+    // 배경을 지금 화면 폭에 맞춤.
+    // 웹에서는 처음 480x854 비율로 켜졌다가 휴대폰 화면 비율로 바뀌므로, 폭이 바뀔 때마다 다시 맞춰야
+    // 양옆에 빈 띠(카메라 바탕색)가 안 생김
+    void FitGround()
+    {
+        float scale = halfW * 2f / groundSpriteSize.x * 1.02f;
+        float oldTileH = groundTileH;
+        groundTileH = groundSpriteSize.y * scale;
+        for (int i = 0; i < groundTiles.Length; i++)
+        {
+            var t = groundTiles[i];
+            if (t == null) continue;
+            t.localScale = Vector3.one * scale;
+            // 흐르던 위치는 비율대로 유지 (처음엔 0, 1칸 위)
+            float y = oldTileH > 0f ? t.position.y / oldTileH * groundTileH : i * groundTileH;
+            t.position = new Vector3(0f, y, 0f);
+        }
+        groundFitHalfW = halfW;
     }
 
     void UpdateGround(float dt)
     {
+        if (Mathf.Abs(halfW - groundFitHalfW) > 0.001f) FitGround(); // 화면 폭이 바뀌었으면 다시 맞춤
         if (state != State.Title && state != State.Playing) return;
         foreach (var t in groundTiles)
         {
@@ -1811,7 +1831,15 @@ public class BugsBugsGame : MonoBehaviour
 
         // 사운드 켜기/끄기 (타이틀에서도)
         MakeSoundButton(panel, new Vector2(-12, -12));
+
+        // 버전 (발표 자료의 버전과 같게 유지, 왼쪽 아래 작게)
+        var ver = MakeText(panel, GameVersion, 20, Cream, TextAnchor.MiddleLeft);
+        Place(ver.rectTransform, new Vector2(0, 0), new Vector2(0, 0), new Vector2(16, 12), new Vector2(160, 28));
+        AddOutline(ver, IconBrown, 1.5f);
     }
+
+    // 빌드를 새로 올릴 때마다 올려 주면, 폰 화면에서 최신 빌드인지 바로 확인 가능
+    const string GameVersion = "v1.0";
 
     // ================================================================= 조작 안내 (How to Play)
     // 로비 화면 터치 : 처음 하는 사람이면 조작 안내부터, 본 적 있으면 바로 시작
